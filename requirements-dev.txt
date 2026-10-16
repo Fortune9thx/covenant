@@ -1,0 +1,6 @@
+# Development-only dependencies. The contract itself depends on nothing outside
+# the pinned GenVM `Depends` bundle.
+pytest==9.1.1
+ruff==0.16.9
+genlayer-py==0.19.0rc2
+genlayer-test==0.30.0rc2

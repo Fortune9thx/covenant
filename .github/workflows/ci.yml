@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  contract:
+    name: contract · lint · test · bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install genvm-linter
+
+      - name: Ruff
+        run: ruff check .
+
+      - name: Unit tests
+        run: pytest
+
+      - name: Build deployable bundle
+        run: python contracts/build_bundle.py
+
+      - name: The committed bundle must match the source it claims to come from
+        run: git diff --exit-code -- contracts/build/Covenant.bundled.py
+
+      # `lint` runs the AST safety checks and needs no SDK download. `check`
+      # also validates the schema against the pinned runner tarball, which is
+      # not always fetchable from a cold runner -- so `lint` is the gate and
+      # `check` is advisory. PYTHONIOENCODING or genvm-lint dies writing its
+      # own check mark on a non-UTF-8 console.
+      - name: Contract safety lint (gate)
+        env:
+          PYTHONIOENCODING: utf-8
+        run: genvm-lint lint contracts/build/Covenant.bundled.py
+
+      - name: Contract schema check (advisory)
+        continue-on-error: true
+        env:
+          PYTHONIOENCODING: utf-8
+        run: genvm-lint check contracts/build/Covenant.bundled.py
+
+  frontend:
+    name: frontend · typecheck · build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build

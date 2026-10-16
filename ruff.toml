@@ -1,0 +1,30 @@
+line-length = 100
+target-version = "py311"
+
+exclude = ["contracts/build"]
+
+[lint]
+# Selected explicitly rather than relying on ruff's defaults, which widen
+# between releases — CI pins the version to match.
+select = ["E", "F", "W", "I", "UP", "B", "BLE", "PIE", "RUF", "ISC", "EXE", "C4"]
+
+ignore = [
+  # The contract uses `from genlayer.types import *`, the documented SDK pattern.
+  "F403", "F405",
+  # Tests install the fake GenVM before importing the contract, which must
+  # happen after sys.path is set up.
+  "E402",
+  # Blind excepts are load-bearing here, not sloppy: every judgment path maps
+  # *any* failure onto INCONCLUSIVE so a crash can never be mistaken for a
+  # breach. Narrowing these would let an unanticipated exception escape and
+  # fail open.
+  "BLE001",
+  # `evidence_urls: list = None` is the contract's public ABI. Rewriting it to
+  # satisfy implicit-Optional would change the annotation GenVM reads to build
+  # the contract schema, so the runtime signature wins.
+  "RUF013",
+]
+
+[lint.per-file-ignores]
+# Assertions are the point of a test suite.
+"tests/*" = ["B011"]

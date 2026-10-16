@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node / Vite
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Env & local secrets — never commit these
+.env
+.env.*
+!.env.example
+*.local
+.vercel
+.env.vercel
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

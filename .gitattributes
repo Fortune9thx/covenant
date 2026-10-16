@@ -1,0 +1,10 @@
+# Deployables are byte-sensitive: the Depends line must be byte one and the
+# bundle must match what CI built. Force LF in every text file and never let a
+# checkout rewrite it.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+contracts/build/*.py text eol=lf -diff linguist-generated
