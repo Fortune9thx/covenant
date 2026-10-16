@@ -284,13 +284,14 @@ const CONSENSUS_MAX_ROTATIONS = 6;
 /**
  * A write on Studio Dev is rejected client-side with `FeeValueMustBeNonZero(1)`
  * unless it carries a complete fee distribution *and* a non-zero deposit; the
- * SDK does not infer one here. This is the distribution a successful deploy on
- * this network uses. The wallet must hold `value + feeValue`; the deposit is
- * mostly returned once the round settles.
+ * SDK does not infer one here. These are the exact `distribution` and
+ * `feeValue` of a deploy that reached ACCEPTED on this network, so the budget
+ * and the deposit are consistent with one another. The wallet must hold
+ * `value + feeValue`; the deposit is mostly returned once the round settles.
  */
 const WRITE_FEES = {
   distribution: {
-    rotations: [3],
+    rotations: [0],
     appealRounds: 0,
     totalMessageFees: 0,
     executionConsumed: 0,

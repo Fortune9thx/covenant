@@ -5,8 +5,8 @@
   "explorer": "https://explorer-studio-dev.genlayer.com",
   "contracts": {
     "Covenant": {
-      "address": "0x49273409Fbff08c5EFc5d85De16ffc81EC638d8E",
-      "deploy_tx": "0xc57bf7bb9d3164fb2ad161984b14492e7a357b84028cfe0438eddb150a273abf",
+      "address": "0x10613875C7319F8740040eCD624eCd8750e6838e",
+      "deploy_tx": "0x31176c6f9b716d27fefb70369e3541c35a25859e9d69a11742501be303741396",
       "deployed_at": "2026-10-16"
     }
   }

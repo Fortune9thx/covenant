@@ -550,6 +550,11 @@ class Covenant(gl.contract.Contract):
                 [evidence_a, evidence_b], covenant["evidence_patterns"]
             )
         )
+        # Two contested documents are the minimum a breach can rest on. The
+        # validator de-duplicates, so two spellings of the same URL collapse to
+        # one; reject that rather than index past the end of the list.
+        if len(urls) < 2:
+            _err("evidence urls must be two distinct documents")
         evidence_a, evidence_b = urls[0], urls[1]
         tele = covenant["telemetry_url"]
 

@@ -25,8 +25,9 @@ import json
 """SSRF-resistant evidence-URL policy.
 
 Every URL that can reach a validator's fetcher is validated here before it is
-frozen into a dispute, and the same rules are re-applied by every validator at
-fetch time. The policy is deliberately strict: an evidence URL exists to point
+frozen into a dispute, and only then stored; the stored value is what validators
+fetch, so the check runs once at admission and the result is immutable
+thereafter. The policy is deliberately strict: an evidence URL exists to point
 at a public, third-party web page, so anything that could aim the fetcher at the
 machine it runs on — or at a name that resolves there — is refused outright
 rather than resolved and checked.
@@ -1138,6 +1139,11 @@ class Covenant(gl.contract.Contract):
                 [evidence_a, evidence_b], covenant["evidence_patterns"]
             )
         )
+        # Two contested documents are the minimum a breach can rest on. The
+        # validator de-duplicates, so two spellings of the same URL collapse to
+        # one; reject that rather than index past the end of the list.
+        if len(urls) < 2:
+            _err("evidence urls must be two distinct documents")
         evidence_a, evidence_b = urls[0], urls[1]
         tele = covenant["telemetry_url"]
 

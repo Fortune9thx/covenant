@@ -216,6 +216,16 @@ def test_file_dispute_rejects_underpayment(app, gl):
         file_dispute(app, gl, cid, value=DBOND - 1)
 
 
+def test_file_dispute_rejects_identical_evidence_urls(app, gl):
+    # The validator de-duplicates URLs, so the same document twice must be a
+    # clean rejection, never an index past the end of the normalized list.
+    cid = active(app, gl)
+    set_sender(gl, A)
+    gl.message.value = DBOND
+    with pytest.raises(UserError):
+        app.file_dispute("d-1", cid, "uphold", "claim", EV_A, EV_A)
+
+
 def test_overpayment_is_held_as_refundable_balance(app, gl):
     cid = active(app, gl)
     file_dispute(app, gl, cid, value=DBOND + 50)

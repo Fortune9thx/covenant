@@ -11,8 +11,8 @@ here is aspirational.
 |---|---|
 | Network | GenLayer Studio Dev, chain `61997` |
 | Contract | `Covenant` |
-| Address | `0x49273409Fbff08c5EFc5d85De16ffc81EC638d8E` |
-| Deploy tx | `0xc57bf7bb9d3164fb2ad161984b14492e7a357b84028cfe0438eddb150a273abf` |
+| Address | `0x10613875C7319F8740040eCD624eCd8750e6838e` |
+| Deploy tx | `0x31176c6f9b716d27fefb70369e3541c35a25859e9d69a11742501be303741396` |
 | Deploy status | `ACCEPTED` (leader `AGREE`, 5 validators) |
 | Deployed | 2026-10-16 |
 | Treasury / owner | `0x00f42f7AD0EdbD0818BD46c8E51cdB5670Dde6d9` (deployer) |
@@ -20,9 +20,9 @@ here is aspirational.
 Confirmed live by schema, not by `eth_getCode`:
 
 ```
-genlayer.cmd schema 0x49273409Fbff08c5EFc5d85De16ffc81EC638d8E
-genlayer.cmd call   0x49273409Fbff08c5EFc5d85De16ffc81EC638d8E get_config
-genlayer.cmd call   0x49273409Fbff08c5EFc5d85De16ffc81EC638d8E get_solvency
+genlayer.cmd schema 0x10613875C7319F8740040eCD624eCd8750e6838e
+genlayer.cmd call   0x10613875C7319F8740040eCD624eCd8750e6838e get_config
+genlayer.cmd call   0x10613875C7319F8740040eCD624eCd8750e6838e get_solvency
 ```
 
 Schema reports **18 methods: 9 view, 9 write**, with `register_agent` and
@@ -70,7 +70,7 @@ All commands run from the repository root unless noted.
 
 | Check | Command | Result |
 |---|---|---|
-| Unit + state-machine tests | `python -m pytest` | **100 passed** |
+| Unit + state-machine tests | `python -m pytest` | **101 passed** |
 | Lint | `ruff check .` | **All checks passed!** |
 | GenVM lint | `genvm-lint lint contracts/build/Covenant.bundled.py` | Lint passed |
 | GenVM check | `genvm-lint check contracts/build/Covenant.bundled.py` | Valid — `Covenant`, 18 methods (9 view, 9 write) |
@@ -93,7 +93,7 @@ Studio Dev directly, resolved through EIP-6963 rather than a bare
 `window.ethereum`. Liveness is probed with `gen_getContractSchema`; a failed or
 unconfigured deployment states that plainly instead of guessing an address.
 
-Set `VITE_CONTRACT_ADDRESS=0x49273409Fbff08c5EFc5d85De16ffc81EC638d8E` and build.
+Set `VITE_CONTRACT_ADDRESS=0x10613875C7319F8740040eCD624eCd8750e6838e` and build.
 
 ## Known limits
 
