@@ -6,7 +6,7 @@ import { TxStatus, useTx } from "../components/TxPanel";
 import { useHealth } from "../components/Chrome";
 import { Eyebrow, Field, Section } from "../components/ui";
 import { getConfig, hasWallet } from "../lib/chain";
-import { gen } from "../lib/format";
+import { gen, toWei } from "../lib/format";
 import { useAsync } from "../lib/useAsync";
 
 export default function RegisterAgent() {
@@ -19,17 +19,28 @@ export default function RegisterAgent() {
 
   const [name, setName] = useState("");
   const [endpoint, setEndpoint] = useState("");
+  const [amount, setAmount] = useState<string | null>(null);
 
   useEffect(() => {
     if (tx.outcome?.ok) navigate("/app/agents");
   }, [tx.outcome, navigate]);
 
-  const collateral = cfg.data ? BigInt(cfg.data.reg_collateral) : 0n;
+  // The floor keeps you registered; one more bond's worth lets you back a
+  // covenant. Funds cannot be added after registration, so this is the one
+  // chance to post enough.
+  const floor = cfg.data ? BigInt(cfg.data.reg_collateral) : 0n;
+  const suggested = cfg.data
+    ? BigInt(cfg.data.reg_collateral) + BigInt(cfg.data.default_bond)
+    : 0n;
+  const defaultAmount = cfg.data ? gen(suggested).replace(" GEN", "") : "";
+  const amountStr = amount ?? defaultAmount;
+  const amountWei = toWei(amountStr);
+  const amountOk = !!cfg.data && amountWei >= floor;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
-    tx.run("register_agent", [name.trim(), endpoint.trim()], collateral);
+    if (!name.trim() || !amountOk) return;
+    tx.run("register_agent", [name.trim(), endpoint.trim()], amountWei);
   };
 
   return (
@@ -61,9 +72,18 @@ export default function RegisterAgent() {
                 placeholder="https://agent.example.com"
               />
             </Field>
-            <Field label="Collateral (locked)">
-              <p className="mt-1.5 text-sm font-semibold text-ink">
-                {cfg.data ? gen(collateral) : "—"}
+            <Field label="Collateral you post (GEN)">
+              <input
+                className="input mt-1.5"
+                value={amountStr}
+                onChange={(e) => setAmount(e.target.value)}
+                inputMode="decimal"
+                placeholder={defaultAmount || "0.011"}
+              />
+              <p className="mt-1.5 text-[12px] leading-relaxed text-mute">
+                Locked while registered. The floor is {cfg.data ? gen(floor) : "—"}; post at least{" "}
+                {cfg.data ? gen(suggested) : "—"} to back one covenant bond. You cannot add funds
+                later, so post more if you expect several covenants.
               </p>
             </Field>
           </div>
@@ -80,7 +100,10 @@ export default function RegisterAgent() {
           )}
 
           <div className="mt-6">
-            <button className="btn-primary w-full" disabled={tx.busy || !live || !name.trim()}>
+            <button
+              className="btn-primary w-full"
+              disabled={tx.busy || !live || !name.trim() || !amountOk}
+            >
               {tx.busy ? "Submitting…" : "Register agent"}
             </button>
           </div>

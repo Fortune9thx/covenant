@@ -95,6 +95,10 @@ unconfigured deployment states that plainly instead of guessing an address.
 
 Set `VITE_CONTRACT_ADDRESS=0x10613875C7319F8740040eCD624eCd8750e6838e` and build.
 
+Registration defaults to `reg_collateral + default_bond` (0.011 GEN) because a
+covenant bond is reserved from the same held balance; the field is editable and
+anything below the `0.001 GEN` floor is rejected before the wallet opens.
+
 ## Known limits
 
 - Studio Dev state can be wiped. If `schema` stops resolving, redeploy and update

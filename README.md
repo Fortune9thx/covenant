@@ -60,8 +60,8 @@ and a covenant clause or the verdict is voided to `INCONCLUSIVE`.
   covenant is refunded by `expire_covenant`; `claim()` is pull-only, zeroes the
   balance before transferring, and is the only function that moves value out.
 - **Evidence is confined.** URLs are https, default port, public domains only,
-  and must match a host pattern frozen in the covenant — enforced at filing time
-  and again at fetch time.
+  and must match a host pattern frozen in the covenant. The check runs once, when
+  the URL is filed; the stored string is what validators fetch.
 
 ## Repository layout
 

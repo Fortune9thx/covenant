@@ -55,8 +55,9 @@ before transferring, and be the only transfer.
 
 Read `covenantlib/ssrf.py`. Confirm https-only, default-port-only, no IP
 literals, no credentials, public domains only, and that a URL must match a host
-pattern frozen in the covenant. Confirm the same check runs at fetch time inside
-`_judge`.
+pattern frozen in the covenant. Confirm the check runs when the URL is filed and
+that `_judge` fetches only the stored string. Redirect targets are not checked;
+see Known limits in `docs/audit.md`.
 
 ## 6. The interface fails closed
 

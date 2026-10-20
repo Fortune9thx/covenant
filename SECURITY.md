@@ -45,12 +45,15 @@ The design assumes every off-chain input is hostile:
 
 ### SSRF and resource bounds
 
-Evidence and telemetry URLs are validated before they are ever frozen and
-re-checked at fetch time. Only `https` on the default port, no credentials, no
-IP literals, no loopback/metadata/private/link-local/`home.arpa` hosts,
-alphabetic TLDs only, bounded URL count and length, and a bounded number of
-characters per fetched page. See `contracts/covenantlib/ssrf.py` for the exact
-rules and `docs/audit.md` for their rationale.
+Evidence and telemetry URLs are validated before they are ever frozen, and the
+frozen value is what every validator fetches; no later caller can substitute a
+URL. Only `https` on the default port, no credentials, no IP literals, no
+loopback/metadata/private/link-local/`home.arpa` hosts, alphabetic TLDs only,
+bounded URL count and length, and a bounded number of characters per fetched
+page. The check covers the URL string, not the redirect target the fetcher may
+follow, so an allow-list should name hosts that serve evidence directly. See
+`contracts/covenantlib/ssrf.py` for the exact rules and `docs/audit.md` for their
+rationale.
 
 ## Out of scope
 

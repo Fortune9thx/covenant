@@ -82,8 +82,9 @@ Tests: `test_cancel_stale_refunds_and_reactivates`,
 
 Enforced: `normalize_evidence_urls` requires https, a default port, a public
 domain, no credentials, and a match against a host pattern frozen in the
-covenant. The pattern check is applied at filing time and the URL is re-checked
-at fetch time.
+covenant. The check runs once, when the URL is filed; the validated string is
+stored and that stored value is what validators fetch, so no later caller can
+substitute a URL. The check covers the URL string, not where a redirect leads.
 Tests: `test_ssrf.py`, `test_file_dispute_rejects_a_disallowed_host`.
 
 ### 11. Inputs are bounded
@@ -131,5 +132,12 @@ Tests: `test_bundle.py`.
   would need its own anti-spam and liveness argument.
 - `CONFLICTING` is a model judgment over the fetched text; it is corroborated by
   validators re-fetching, but it is not a cryptographic proof of provenance.
+- The URL check does not inspect redirects. An allow-listed host that redirects
+  to an internal address would still be fetched, which is why the allow-list
+  should name hosts that serve evidence directly rather than link shorteners or
+  open redirectors.
+- A dispute must be filed while the covenant is active. Once the term lapses,
+  `expire_covenant` is permissionless and refunds both bonds, so a breach that no
+  one filed before expiry cannot be adjudicated afterwards.
 - Studio Dev state can be reset. The interface treats an unconfirmed deployment
   as "not live" rather than assuming persistence.
