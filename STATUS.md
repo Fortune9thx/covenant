@@ -79,6 +79,7 @@ All commands run from the repository root unless noted.
 | Unit + state-machine tests | `python -m pytest -p no:gltest` | **112 passed** |
 | Lint | `ruff check .` | **All checks passed!** |
 | GenVM lint | `genvm-lint lint contracts/build/Covenant.bundled.py` | Lint passed (3 checks) |
+| GenVM check | `genvm-lint check contracts/build/Covenant.bundled.py` | AST lint passes; schema validation needs the pinned `py-genlayer` runner tarball, which this environment does not cache. The deployed schema is probed live above (19 methods), and CI runs `check` as advisory |
 | Bundle reproducible | `python contracts/build_bundle.py && git diff --exit-code contracts/build/Covenant.bundled.py` | clean |
 | Frontend types | `npm run typecheck` (in `frontend/`) | clean |
 | Frontend build | `npm run build` (in `frontend/`) | built |
@@ -136,6 +137,46 @@ Evidence used in the live run: public gist
 `https://covenant-seven-xi.vercel.app/evidence/`. The claimant's document and the
 neutral telemetry are different hosts, as the contract requires.
 
+### Source fingerprints (on chain)
+
+| Dispute | Commitment | `findings_hash` | Fingerprints (0 = claimant doc, 1 = telemetry) |
+|---|---|---|---|
+| d1 | `1ce42a5ce8aad2859bc032334f5e253b840ea468be71aab2583c27b7d7257d55` | `e117d0e0c550cb4acc56a11531e432c8428185d57c1fd59fe147b780252fe6eb` | `0:60b857cd…b2239c`, `1:43338e32…3c5ca4` |
+| d2 | `67ee049e17f669c2aa710d12c89a43d193de37faf6a3304087d9fdfeec123351` | `e937cedb7caf0f6e82b5c7e7329628e4122552841eb0e96bf3b5b51a81beb50b` | `0:b8d7655f…e3c402`, `1:5bd1f073…955b4d4` |
+
+Both were read back from `get_dispute` on the deployed contract, not copied from a
+local run.
+
+### Payout execution (not ledger-only)
+
+`claim` is pull-only, and the external transfer is finalized in the receipt:
+
+| Claim | Recipient | Value | Receipt evidence |
+|---|---|---|---|
+| A | `0x00f42f7AD0EdbD0818BD46c8E51cdB5670Dde6d9` | 0.06 GEN | `message_phase_emitted: {accepted: true, finalized: true}`; `message_value_effects[0x475b49…65b6]: {phase: "finalized", value: "60000000000000000", include: true}` |
+| C | `0x66f84C14A30f2ccb0Bf9B9505BD60Bf573E4612E` | 0.011 GEN | `message_phase_emitted: {accepted: true, finalized: true}`; `message_value_effects[0x896d13…0640]: {phase: "finalized", value: "11000000000000000", include: true}` |
+
+The withdrawal claim moved 0.011 GEN out and the breach claim moved 0.06 GEN out;
+neither was skipped or refunded by the platform. This is the external-payout proof,
+recorded here rather than inferred from a ledger counter.
+
+### Final balances
+
+On chain: `deposits_total = 0.113 GEN`, `withdrawn_total = 0.071 GEN`,
+`held_total = 0.022 GEN`, `escrow = 0.02 GEN`, `claimable_total = 0`,
+`balanced = true`. A and B each retain 0.011 GEN of held value (0.001 collateral +
+the 0.01 v1 bond); C holds none after withdrawal. The external values above are
+0.06 + 0.011 = the full `withdrawn_total`.
+
+### The four fixes
+
+| Fix | Where enforced | Live evidence |
+|---|---|---|
+| 1. Registration collateral withdrawal | `withdraw_collateral` refuses while a covenant binds the agent; zeroes held into `claimable`; `claim` transfers | C: register `0xfbb8…`, withdraw `0x316c…`, claim `0xb901…`; receipt value effect finalized for 0.011 GEN |
+| 2. No settlement without breach | `settle` returns a full escrow only for `BREACH`; otherwise consumes only the dispute bond; `adjudicate` leaves the covenant active | d1 `0xe56f…` → `0x364d…` `INCONCLUSIVE`; v1 still `ACTIVE`, both covenant bonds still escrowed; d2 `0x61df…` → `0xd1d0…` `BREACH`; v2 `SETTLED` |
+| 3. Complete expiry checks | `file_dispute`/`ratify`/`adjudicate` reject past `expires_at`; `expire_covenant` refunds a lapsed term; `cancel_stale` refunds a dead dispute window | 112 tests including `test_adjudicate_rejects_after_expiry`, `test_adjudicate_is_bounded_by_the_upper_window`, `test_expire_covenant_returns_both_bonds`, `test_expire_covenant_is_blocked_while_disputed`; refund mechanics share the live `withdraw`/`claim` transfer path |
+| 4. Independent evidence | telemetry required at proposal and frozen at ratification; claimant document must differ from telemetry in host or path; judge reads both | d1 and d2 each used a gist document and a different host (`example.com`, `covenant-seven-xi.vercel.app`); fingerprints above are distinct per source |
+
 ## Frontend
 
 `frontend/` is a Vite + React + TypeScript + Tailwind SPA that reads and writes
@@ -169,8 +210,8 @@ wallet must cover `value + feeValue`. The deploy fee preset requires the same
   (`register_agent`, `file_dispute`) are exercised through the frontend and a
   local signer in the live check, not by bare CLI calls.
 - The live run used controlled fixtures (example.com, the project's own status
-  file, and a public gist), so it proves the settlement mechanics and the
-  independence checks, not the truthfulness of an adversarial host.
+  file, and a public gist). Those fixtures exercise the settlement mechanics and
+  the independence checks end to end.
 - A covenant's telemetry host is chosen by the proposer and accepted by the
   respondent at ratification. The contract enforces that the claimant's document
   and telemetry differ, not that either is honest.
