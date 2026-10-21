@@ -22,7 +22,7 @@ The chain's source should match the bundle.
 ## 2. One nondeterministic path
 
 ```sh
-genvm-lint check contracts/build/Covenant.bundled.py
+genvm-lint lint contracts/build/Covenant.bundled.py
 ```
 
 Read `_judge` in the bundle: it should contain the only `gl.eq_principle` call,
@@ -31,7 +31,7 @@ and every `gl.nondet.*` call should be directly inside the `judge` closure.
 ## 3. Fail-closed is real
 
 ```sh
-pytest -q
+python -m pytest -p no:gltest
 ```
 
 Then read `test_fetch_failure_is_inconclusive_and_never_consults_the_model` — it
@@ -40,9 +40,11 @@ asserts the model is never consulted when evidence does not read cleanly.
 ## 4. The value system balances
 
 Read `get_solvency` in the contract and `covenantlib/accounting.py`, then run
-`test_accounting.py` and the state-machine tests. `settle` must return credits
-that sum to exactly `escrow_for(bond, dispute_bond)`, and the contract asserts
-`conserved` before moving value. `get_solvency` recomputes
+`test_accounting.py` and the state-machine tests. `settle` returns
+`(credits, consumed)` and the contract asserts `conserved(credits, consumed)`
+before moving value. Only `BREACH` consumes `2 * bond + dispute_bond`; every
+other verdict consumes only `dispute_bond` and leaves the covenant active with
+both covenant bonds in escrow. `get_solvency` recomputes
 
 ```
 deposits_total - withdrawn_total == held_total + claimable_total + escrow
@@ -59,6 +61,11 @@ pattern frozen in the covenant. Confirm the check runs when the URL is filed and
 that `_judge` fetches only the stored string. Redirect targets are not checked;
 see Known limits in `docs/audit.md`.
 
+Confirm `propose_covenant` requires a telemetry URL and `ratify_covenant` freezes
+it, and that `file_dispute` rejects a claimant document on the telemetry's host
+or path. The judge must read the claimant document and the telemetry; a `BREACH`
+must cite a source and a clause, or it is downgraded.
+
 ## 6. The interface fails closed
 
 Read `frontend/src/lib/tx.ts`. Success is an allow-list; a missing or
@@ -72,17 +79,24 @@ uses `gen_getContractSchema`, not `eth_getCode`.
 genlayer.cmd schema 0x<address>
 ```
 
-Expect 18 methods: 9 views and 9 writes, one constructor parameter.
+Expect 19 methods: 9 views and 10 writes, one constructor parameter, and exactly
+two payable methods (`register_agent`, `file_dispute`).
 
 ## 8. Try to make it slash a bond it should not
 
 - Register two agents, form a covenant, and file a dispute against a healthy
-  status page. It must settle `NO_BREACH` and refund.
-- Point an evidence URL outside the covenant's allow-list. It must be rejected
-  before any validator sees it.
+  status page. It must not settle `BREACH`: it returns the dispute bond, keeps
+  the covenant active, and leaves both covenant bonds escrowed. The live run's
+  d1 (`INCONCLUSIVE`) is this path.
+- File a dispute whose document is on the telemetry's host or path. It must be
+  rejected before any validator sees it.
+- Point an evidence URL outside the covenant's allow-list. It must be rejected.
 - File a dispute citing a clause that is not in the covenant. It must be
   rejected.
 - Adjudicate the same dispute twice. The second call must be rejected.
+- Register a fresh agent with no covenants, call `withdraw_collateral`, then
+  `claim`. The agent record must disappear and the full collateral must be paid
+  back. The live run's agent C did this.
 
 ## 9. Agreement is on content, not just verdicts
 
@@ -101,4 +115,5 @@ prompt excerpt but must have different digests.
 `genvm-lint`, and the judgment pipeline is driven end to end in `pytest` through
 `tests/fake_genlayer.py`, which models the leader/validator split. There is no
 `gltest` fixture in this repository, so the suite does not exercise the real
-runner; `genvm-lint check` and a live deploy are what stand in for that.
+runner; `genvm-lint lint` and the live deploy recorded in `STATUS.md` stand in for
+that.

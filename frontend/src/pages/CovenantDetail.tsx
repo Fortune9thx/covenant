@@ -25,15 +25,14 @@ function FileDispute({ covenant, disputeBond }: { covenant: Covenant; disputeBon
   const [key, setKey] = useState("");
   const [clause, setClause] = useState(covenant.clause_ids[0] ?? "");
   const [claim, setClaim] = useState("");
-  const [evA, setEvA] = useState("");
-  const [evB, setEvB] = useState("");
+  const [evidence, setEvidence] = useState("");
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!key.trim() || !clause || !claim.trim() || !evA.trim() || !evB.trim()) return;
+    if (!key.trim() || !clause || !claim.trim() || !evidence.trim()) return;
     tx.run(
       "file_dispute",
-      [key.trim(), covenant.covenant_id, clause, claim.trim(), evA.trim(), evB.trim()],
+      [key.trim(), covenant.covenant_id, clause, claim.trim(), evidence.trim()],
       disputeBond,
     );
   };
@@ -42,8 +41,9 @@ function FileDispute({ covenant, disputeBond }: { covenant: Covenant; disputeBon
     <form onSubmit={submit} className="card mt-5 p-6">
       <p className="text-[13px] font-bold uppercase tracking-[0.1em] text-ink">File a dispute</p>
       <p className="mt-1 text-[12px] text-mute">
-        Cite a clause and freeze two documents. Validators re-fetch both and judge; a disputed round
-        costs <Mono>{gen(disputeBond)}</Mono>.
+        Cite a clause and supply one document on a different host from the covenant's telemetry.
+        The telemetry URL is the second, neutral source; validators re-fetch both and judge. A
+        disputed round costs <Mono>{gen(disputeBond)}</Mono>.
       </p>
       <div className="mt-4 space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
@@ -74,10 +74,16 @@ function FileDispute({ covenant, disputeBond }: { covenant: Covenant; disputeBon
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Your evidence URL">
-            <input className="input mt-1.5" value={evA} onChange={(e) => setEvA(e.target.value)} />
+            <input
+              className="input mt-1.5"
+              value={evidence}
+              onChange={(e) => setEvidence(e.target.value)}
+            />
           </Field>
-          <Field label="Counterparty evidence URL">
-            <input className="input mt-1.5" value={evB} onChange={(e) => setEvB(e.target.value)} />
+          <Field label="Neutral source (from covenant)">
+            <span className="mt-1.5 block break-all text-[12px] text-mute">
+              {covenant.telemetry_url || "the covenant has no telemetry URL"}
+            </span>
           </Field>
         </div>
       </div>
@@ -189,8 +195,14 @@ export default function CovenantDetail() {
                 </div>
               )}
 
-              {c.status === "ACTIVE" && isParty && cfg.data && (
+              {c.status === "ACTIVE" && isParty && !expired && cfg.data && (
                 <FileDispute covenant={c} disputeBond={BigInt(cfg.data.default_dispute_bond)} />
+              )}
+              {c.status === "ACTIVE" && isParty && expired && (
+                <p className="mt-5 text-[12px] text-mute">
+                  The covenant term has lapsed; it can no longer be disputed. Expire it to return
+                  both bonds.
+                </p>
               )}
             </div>
 

@@ -13,6 +13,8 @@ export interface Agent {
   /** Wei, as a decimal string — exact beyond 2**53. */
   collateral: string;
   registered_at: number;
+  status?: "ACTIVE" | "CLOSED";
+  closed_at?: number;
 }
 
 export interface Covenant {
@@ -54,6 +56,8 @@ export interface Dispute {
   bond: string;
   status: DisputeStatus;
   verdict: Verdict | "";
+  /** True only when a proven breach settled the covenant. */
+  covenant_settled?: boolean;
   code: string;
   supporting_sources: number[];
   clause_ids: string[];

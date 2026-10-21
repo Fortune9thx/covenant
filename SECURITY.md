@@ -25,14 +25,17 @@ The design assumes every off-chain input is hostile:
   supporting-source indices, sorted clause ids, and per-source fingerprints — is
   compared across validators.
 - **The claimant.** Nothing about a dispute is taken on the claimant's word. The
-  two contested documents are frozen at filing time and the
+  claimant supplies at most one document; the second is the covenant's telemetry
+  URL, frozen at proposal and ratified by both parties. The two must be distinct
+  documents on distinct hosts. Both are frozen at filing time and the
   `dispute_commitment` is re-derived at adjudication; a mismatch rejects before
   any judgment runs.
 
 ### Fail-closed invariants
 
-1. Only `BREACH` slashes a bond. `NO_BREACH`, `INCONCLUSIVE`, and `CONFLICTING`
-   refund both covenant bonds and the dispute bond in full.
+1. Only `BREACH` settles a covenant and slashes a bond. `NO_BREACH`,
+   `INCONCLUSIVE`, and `CONFLICTING` return only the filer's dispute bond and
+   leave the covenant active with both covenant bonds still escrowed.
 2. A failed or partial evidence fetch can only ever produce `INCONCLUSIVE`. The
    model is not consulted at all when evidence cannot be read.
 3. No consensus, a model error, or an unparseable agreed value all resolve to
@@ -42,9 +45,18 @@ The design assumes every off-chain input is hostile:
 5. `claim()` is the only function that moves value out, it zeroes the balance
    before transferring, and it can only ever send an address its own
    already-credited amount. There is no admin path that seizes or force-pays.
+6. Time-bound states reject writes past their deadline: an expired proposal
+   cannot be ratified, an expired covenant cannot be disputed or adjudicated, and
+   `adjudicate` refuses once the dispute window has closed (only `cancel_stale`
+   remains, which refunds the dispute bond and reactivates the covenant).
+7. Registration collateral is recoverable: `withdraw_collateral` closes the
+   registration and credits every remaining held wei to `claimable`, but is
+   refused while any covenant still binds the agent.
 
 ### SSRF and resource bounds
 
+The telemetry URL is required at proposal and must match the covenant's evidence
+pattern; it is the neutral second source, so a dispute cannot be filed without it.
 Evidence and telemetry URLs are validated before they are ever frozen, and the
 frozen value is what every validator fetches; no later caller can substitute a
 URL. Only `https` on the default port, no credentials, no IP literals, no

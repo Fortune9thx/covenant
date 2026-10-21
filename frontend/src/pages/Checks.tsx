@@ -184,6 +184,13 @@ export default function Checks() {
                 {tx.busy ? "Submitting…" : "Move excess to claimable"}
               </button>
               <button
+                className="btn-white"
+                disabled={tx.busy}
+                onClick={() => tx.run("withdraw_collateral", [])}
+              >
+                {tx.busy ? "Submitting…" : "Withdraw collateral"}
+              </button>
+              <button
                 className="btn-primary"
                 disabled={tx.busy}
                 onClick={() => tx.run("claim", [])}
@@ -193,6 +200,11 @@ export default function Checks() {
             </div>
           </div>
         )}
+        <p className="mt-4 text-[12px] leading-relaxed text-mute">
+          Withdraw collateral closes your registration and moves the whole held balance to
+          claimable. It is refused while any covenant still binds you (an open proposal, an active
+          term, or a dispute). Claim then pays what is owed.
+        </p>
         <div className="mt-4">
           <TxStatus hash={tx.hash} outcome={tx.outcome} error={tx.error} />
         </div>

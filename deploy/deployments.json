@@ -1,13 +1,13 @@
-{
+﻿{
   "network": "studio-dev",
   "chain_id": 61997,
   "rpc": "https://studio-dev.genlayer.com/api",
   "explorer": "https://explorer-studio-dev.genlayer.com",
   "contracts": {
     "Covenant": {
-      "address": "0x10613875C7319F8740040eCD624eCd8750e6838e",
-      "deploy_tx": "0x31176c6f9b716d27fefb70369e3541c35a25859e9d69a11742501be303741396",
-      "deployed_at": "2026-10-16"
+      "address": "0x50172760E21bD2dCebD23FBfcF6e0dab7773ebD8",
+      "deploy_tx": "0x3e44e5e8e0bb85e8353d712dfbb767c2755c9a1fdf91e069c898826a6ece90de",
+      "deployed_at": "2026-10-21"
     }
   }
 }

@@ -18,7 +18,9 @@ export default function Agents() {
           <Eyebrow>Registered parties</Eyebrow>
           <h1 className="h-display mt-3 text-[34px]">Agents</h1>
           <p className="mt-2 max-w-xl text-sm text-mute">
-            An agent posts refundable collateral once; that collateral is what a breach can slash.
+            An agent posts refundable collateral once. A breach slashes the bond, not the
+            collateral; when no covenant binds you, withdraw collateral to close the registration
+            and take the whole balance back.
           </p>
         </div>
         <Link to="/app/agents/new" className="btn-primary shrink-0">

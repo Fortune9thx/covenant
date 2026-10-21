@@ -1,0 +1,10 @@
+COVENANT LIVE CHECK - NEUTRAL STATUS LOG (CLEAN WINDOW)
+
+Service: covenant-demo-api
+Window: 2026-10-21T00:00Z to 2026-10-22T00:00Z
+Availability: 100.00%
+Incidents: 0
+
+All health checks passed for the full window. No outage, degradation, or
+maintenance event was recorded. This document is the covenant's frozen neutral
+telemetry source.

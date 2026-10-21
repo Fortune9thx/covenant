@@ -15,7 +15,7 @@ import {
   Spinner,
   VerdictPill,
 } from "../components/ui";
-import { getConfig, getDispute, hasWallet } from "../lib/chain";
+import { getConfig, getCovenant, getDispute, hasWallet } from "../lib/chain";
 import { fromNow, gen, shortHash } from "../lib/format";
 import { useAsync } from "../lib/useAsync";
 
@@ -28,11 +28,22 @@ export default function DisputeDetail() {
   const tx = useTx();
 
   const d = q.data;
+  const cov = useAsync(
+    () => (live && d ? getCovenant(d.covenant_id) : Promise.resolve(null)),
+    [live, d?.covenant_id],
+  );
   const now = Math.floor(Date.now() / 1000);
+  const windowClosed =
+    !!d && !!cfg.data && now >= d.opened_at + cfg.data.stale_timeout_seconds;
+  const covenantExpired = !!cov.data && now >= cov.data.expires_at;
   const canAdjudicate =
-    !!d && d.status === "OPEN" && !!cfg.data && now >= d.opened_at + cfg.data.assess_delay_seconds;
-  const canCancel =
-    !!d && d.status === "OPEN" && !!cfg.data && now >= d.opened_at + cfg.data.stale_timeout_seconds;
+    !!d &&
+    d.status === "OPEN" &&
+    !!cfg.data &&
+    now >= d.opened_at + cfg.data.assess_delay_seconds &&
+    !windowClosed &&
+    !covenantExpired;
+  const canCancel = !!d && d.status === "OPEN" && windowClosed;
 
   useEffect(() => {
     if (tx.outcome?.ok) q.reload();
@@ -81,20 +92,13 @@ export default function DisputeDetail() {
                   </p>
                 </Field>
                 <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                  <Field label="Contested source A">
+                  <Field label="Claimant evidence">
                     <span className="break-all text-sm text-mute">{d.evidence_a}</span>
                   </Field>
-                  <Field label="Contested source B">
+                  <Field label="Neutral source (from covenant)">
                     <span className="break-all text-sm text-mute">{d.evidence_b}</span>
                   </Field>
                 </div>
-                {d.telemetry_url && (
-                  <div className="mt-4">
-                    <Field label="Telemetry (from covenant)">
-                      <span className="break-all text-sm text-mute">{d.telemetry_url}</span>
-                    </Field>
-                  </div>
-                )}
               </div>
 
               {d.status === "RESOLVED" && (
@@ -137,6 +141,11 @@ export default function DisputeDetail() {
                       </div>
                     </Field>
                   </div>
+                  <p className="mt-4 border-t border-line pt-4 text-[12px] leading-relaxed text-mute">
+                    {d.covenant_settled
+                      ? "A breach was proven. The covenant is settled, the accused bond was slashed, the claimant was paid, and the fee went to the treasury."
+                      : "No breach was proven. The covenant stays active with both covenant bonds still escrowed; only the claimant's dispute bond was returned. The same covenant can be disputed again."}
+                  </p>
                 </div>
               )}
             </div>
@@ -182,10 +191,24 @@ export default function DisputeDetail() {
                 </button>
               )}
 
-              {d.status === "OPEN" && !canAdjudicate && cfg.data && (
+              {d.status === "OPEN" && !canAdjudicate && !windowClosed && !covenantExpired && cfg.data && (
                 <p className="text-[12px] text-mute">
                   Assessment opens shortly after filing, so validators observe the evidence as
                   frozen. Adjudication unlocks then.
+                </p>
+              )}
+
+              {d.status === "OPEN" && covenantExpired && !windowClosed && (
+                <p className="text-[12px] text-mute">
+                  The covenant term has lapsed, so this round can no longer be adjudicated. Once
+                  the stale timeout passes, cancel it to return the dispute bond.
+                </p>
+              )}
+
+              {d.status === "OPEN" && windowClosed && cfg.data && (
+                <p className="text-[12px] text-mute">
+                  The adjudication window has closed. Nobody can judge this round now; cancel it to
+                  return the dispute bond and reopen the covenant.
                 </p>
               )}
 

@@ -60,8 +60,7 @@ def strip_docstrings(source):
     Studio Dev has an empirical deploy-size wall a little above 50KB of encoded
     payload, and COVENANT is documented heavily on purpose. Docstrings are
     stripped from the generated bundle so the source stays readable without
-    spending the deploy budget on prose. Comments are left alone: they are
-    cheap and a reviewer reads the bundle too.
+    spending the deploy budget on prose.
 
     Rewriting is done through the AST, so this can never alter a string that is
     actually used — only expression-statement docstrings are dropped.
@@ -100,6 +99,19 @@ def strip_docstrings(source):
     return result
 
 
+def strip_comment_lines(source):
+    """Drop comment-only lines from the deployable, keeping the Depends line.
+
+    The source is where the reasoning lives; the artifact only has to run and
+    fit the deploy budget. Line 1 is a comment directive and must survive.
+    """
+    lines = source.splitlines()
+    kept = [lines[0]] + [ln for ln in lines[1:] if not ln.lstrip().startswith("#")]
+    result = "\n".join(kept) + "\n"
+    compile(result, "<nocomment>", "exec")
+    return result
+
+
 def main():
     contract = (ROOT / "Covenant.py").read_text(encoding="utf-8")
     if BEGIN not in contract or END not in contract:
@@ -130,6 +142,7 @@ def main():
     bundled = DEPENDS + "\n" + "\n".join(lines).lstrip("\n") + "\n"
 
     bundled = strip_docstrings(bundled)
+    bundled = strip_comment_lines(bundled)
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     # newline="" disables platform newline translation. Without it, Windows

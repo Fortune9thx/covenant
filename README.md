@@ -5,23 +5,29 @@ A bilateral agent covenant protocol on GenLayer.
 An **agent** registers with a refundable collateral. Two agents form a
 **covenant**: a written agreement with named clauses and an allow-list of
 evidence hosts, one party proposing and the other ratifying, each locking a
-bond. While active, either party may file a **dispute** that cites a clause and
-freezes two contested evidence documents plus the covenant's telemetry URL.
+bond. The proposal must name a **telemetry URL** — a neutral document on an
+allowed host that both parties ratify. While active, either party may file a
+**dispute** that cites a clause, supplies one evidence document on a different
+host, and freezes the covenant's telemetry URL as the second, independent source.
 
-Validators then independently fetch that evidence and decide, under the
+Validators then independently fetch both documents and decide, under the
 Equivalence Principle, exactly one of four discrete verdicts. Only `BREACH`
-slashes a bond — the accused's bond is cut, the claimant is paid, and a protocol
-fee goes to the treasury. Every other verdict, including every technical
-failure, refunds both covenant bonds and the filer's dispute bond.
+settles the covenant — the accused's bond is cut, the claimant is paid, and a
+protocol fee goes to the treasury. Every other verdict, including every technical
+failure, returns only the filer's dispute bond and leaves the covenant active
+with both covenant bonds still escrowed.
 
-The whole protocol is one contract. Deployable on GenLayer Studio Dev
-(chain `61997`) and Studio Next only.
+The whole protocol is one contract, deployed on GenLayer Studio Dev (chain
+`61997`). Nothing here targets another network.
 
 ## Deployed
 
 - **Contract:** see [deploy/deployments.json](deploy/deployments.json) and
   [STATUS.md](STATUS.md) for the current address on Studio Dev, chain `61997`.
 - **Interface:** see [STATUS.md](STATUS.md) for the deployed interface URL.
+- **Live run:** [STATUS.md](STATUS.md) records a real `INCONCLUSIVE` claim, a
+  real `BREACH` settlement, a paid claim, and a registration-collateral
+  withdrawal, with transaction hashes.
 
 Studio Dev state resets periodically; see [STATUS.md](STATUS.md) for the current
 state rather than assuming an address still resolves.
@@ -30,10 +36,10 @@ state rather than assuming an address still resolves.
 
 | Verdict        | Meaning                                            | Effect                                             |
 | -------------- | -------------------------------------------------- | -------------------------------------------------- |
-| `BREACH`       | The evidence shows the cited clause was breached.  | Accused bond slashed: claimant paid, fee to treasury |
-| `NO_BREACH`    | The evidence shows the clause was honored.         | Both bonds and the dispute bond refunded           |
-| `INCONCLUSIVE` | Absent, unreadable or too thin.                    | Full refund (the fail-closed default)              |
-| `CONFLICTING`  | The two contested sources disagree irreconcilably. | Full refund                                         |
+| `BREACH`       | The evidence shows the cited clause was breached.  | Covenant settled: accused bond slashed, claimant paid, fee to treasury |
+| `NO_BREACH`    | The evidence shows the clause was honored.         | Dispute bond returned; covenant stays active       |
+| `INCONCLUSIVE` | Absent, unreadable or too thin.                    | Dispute bond returned (the fail-closed default)    |
+| `CONFLICTING`  | The two sources disagree irreconcilably.           | Dispute bond returned; covenant stays active       |
 
 A bond is slashed only for `BREACH`; it must cite at least one supporting source
 and a covenant clause or the verdict is voided to `INCONCLUSIVE`.
@@ -52,12 +58,22 @@ and a covenant clause or the verdict is voided to `INCONCLUSIVE`.
   recomputed and exposed by `get_solvency`. `held` is value attributable to an
   address, `claimable` is value an address may pull, and `escrow` is value locked
   in live covenants and open disputes.
-- **The collateral floor is structural.** `withdraw_excess` can only move value
-  above `REG_COLLATERAL` to `claimable`, so a registered agent can never strip
-  itself below the floor while it holds live bonds.
-- **Escape hatches on every escrowed status.** A dispute nobody adjudicates is
-  cancelled by `cancel_stale` (bond refunded, covenant reactivated); a lapsed
-  covenant is refunded by `expire_covenant`; `claim()` is pull-only, zeroes the
+- **The collateral floor is structural, and the collateral is refundable.**
+  `withdraw_excess` can only move value above `REG_COLLATERAL` to `claimable`, so
+  a registered agent can never strip itself below the floor while it holds live
+  bonds. `withdraw_collateral` closes the registration and moves the whole held
+  balance to `claimable`, but only when no covenant binds the agent (an open
+  proposal, an active term, or a dispute).
+- **One claimant, one neutral source.** A dispute accepts exactly one
+  claimant-supplied URL. The second document is the telemetry URL frozen at
+  proposal and ratified by both parties. The two must be distinct documents on
+  distinct hosts, so the claimant cannot manufacture agreement by supplying both
+  sides.
+- **Escape hatches on every escrowed status, with an upper bound too.** A dispute
+  nobody adjudicates is cancelled by `cancel_stale` (bond refunded, covenant
+  reactivated); `adjudicate` refuses once the dispute window has closed; a lapsed
+  covenant is refunded by `expire_covenant`; expired proposals cannot be ratified
+  and expired covenants cannot be disputed; `claim()` is pull-only, zeroes the
   balance before transferring, and is the only function that moves value out.
 - **Evidence is confined.** URLs are https, default port, public domains only,
   and must match a host pattern frozen in the covenant. The check runs once, when
@@ -83,9 +99,9 @@ deploy/                       deployment metadata
 # contract
 pip install -r requirements-dev.txt
 ruff check .
-pytest
+python -m pytest -p no:gltest
 python contracts/build_bundle.py        # regenerate the deployable
-genvm-lint check contracts/build/Covenant.bundled.py
+genvm-lint lint contracts/build/Covenant.bundled.py
 
 # frontend
 cd frontend

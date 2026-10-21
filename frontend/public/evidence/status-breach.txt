@@ -1,0 +1,10 @@
+COVENANT LIVE CHECK - NEUTRAL STATUS LOG (OUTAGE)
+
+Service: covenant-demo-api
+Window: 2026-10-21T00:00Z to 2026-10-22T00:00Z
+Availability: 0.00%
+Incidents: 1
+
+The service stopped responding at the start of the window and remained down for
+the whole window. Every health check failed. No maintenance window was
+announced. This document is the covenant's frozen neutral telemetry source.

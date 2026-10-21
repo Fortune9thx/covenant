@@ -1,0 +1,9 @@
+CLAIMANT EVIDENCE - OUTAGE
+
+Reporting party: proposer
+Covenant window: 2026-10-21T00:00Z to 2026-10-22T00:00Z
+Service: covenant-demo-api
+
+The respondent's service was unavailable for the entire covenant window. Every
+health probe failed and measured availability was 0.00%. The cited clause
+"uptime" requires continuous availability, so the respondent breached it.

@@ -5,17 +5,9 @@ import json
 
 import genlayer as gl
 
-# isort: off
-# These two MUST stay above the covenantlib marker below. The bundler replaces
-# everything between the markers with inlined covenantlib source, so an SDK
-# import that drifts inside the block is silently deleted from the deployable
-# while every local test keeps passing against the fake runtime. That happened
-# on a sibling project, and the fix is this comment.
 from genlayer.storage import TreeMap
 from genlayer.types import *
-# isort: on
 
-# --- begin inlined covenantlib (generated; edit contracts/covenantlib/*.py) ---
 import ipaddress
 import re
 from urllib.parse import urlsplit
@@ -61,8 +53,6 @@ _ALL_DIGITS_RE = re.compile(r"^[0-9]+$")
 _HEX_IP_RE = re.compile(r"^0x[0-9a-f]+$")
 _DOTTED_QUAD_RE = re.compile(r"^[0-9]{1,3}(\.[0-9]{1,3}){3}$")
 
-# Names that resolve to the local host or an internal network rather than to a
-# public server. Checked as suffixes so `x.localhost` is caught with `localhost`.
 _INTERNAL_SUFFIXES = (".localhost", ".local", ".internal", ".home.arpa", ".onion")
 
 
@@ -103,8 +93,6 @@ def ssrf_reason(url):
     if host == "home.arpa":
         return "host is internal or loopback"
 
-    # Refuse every IP literal, canonical or not: dotted-quad, bare integer,
-    # overflow-packed integer, hex, and IPv6 (which still carries colons here).
     if ":" in host or host.startswith("["):
         return "host is an ip literal"
     if _DOTTED_QUAD_RE.match(host) or _ALL_DIGITS_RE.match(host) or _HEX_IP_RE.match(host):
@@ -140,6 +128,10 @@ def _host_normalized(url):
     except ValueError:
         return ""
     return host.lower().rstrip(".")
+
+
+def url_host(url):
+    return _host_normalized(url)
 
 
 def normalize_pattern(pattern):
@@ -378,12 +370,12 @@ def sanitize_untrusted(raw, limit):
 
 """Dispute settlement — the arithmetic that decides who is paid what.
 
-`settle` returns a credit for every party role that is owed anything when a
-dispute is adjudicated. The contract holds exactly the bonds a dispute locked up
-(two covenant bonds plus the filer's dispute bond), so a settlement that did not
-conserve value would either strand GEN in the contract or pay out more than it
-took in. `conserved` exists so the property is asserted in tests rather than
-assumed.
+`settle` returns the credits for every party role and the exact amount of escrow
+that settlement consumes. Only a `BREACH` may settle a covenant: it consumes both
+covenant bonds and the filer's dispute bond. Every other verdict consumes only
+the dispute bond — the filer is made whole and the covenant stays active with
+both covenant bonds still escrowed. A failed or inconclusive claim therefore
+cannot close a covenant or move either party's bond.
 
 Roles are positional, not identity-bound: `claimant_role` is whichever party
 filed the dispute ("proposer" or "respondent"); the other party is the accused.
@@ -414,15 +406,14 @@ def settle(verdict, bond, dispute_bond, fee_bps, bps_denom, claimant_role):
         cut = bond * int(fee_bps) // int(bps_denom)
         credits[claimant_role] = (bond - cut) + bond + dispute_bond
         credits["treasury"] = cut
-    else:
-        credits["proposer"] = bond
-        credits["respondent"] = bond
-        credits[claimant_role] += dispute_bond
-    return credits
+        return credits, escrow_for(bond, dispute_bond)
+
+    credits[claimant_role] = dispute_bond
+    return credits, dispute_bond
 
 
-def conserved(credits, escrow):
-    return sum(int(v) for v in credits.values()) == int(escrow)
+def conserved(credits, consumed):
+    return sum(int(v) for v in credits.values()) == int(consumed)
 
 
 """Covenant-breach judgment: prompt construction, evidence normalization, coercion.
@@ -452,8 +443,6 @@ CONFLICTING = "CONFLICTING"
 
 VERDICTS = (BREACH, NO_BREACH, INCONCLUSIVE, CONFLICTING)
 
-# The fail-closed verdict. Every technical failure — no consensus, a model
-# error, an unparseable answer, an unrecognized verdict token — lands here.
 FAIL_CLOSED = INCONCLUSIVE
 
 MAX_SOURCES = 5
@@ -466,10 +455,6 @@ _TAG_RE = re.compile(r"<[^>]{0,4000}>")
 _WS_RE = re.compile(r"\s+")
 _NON_TOKEN_RE = re.compile(r"[^A-Za-z]")
 
-# Keys are letter-only, so "NO_BREACH", "no breach" and "NoBreach" all land on
-# the same entry. Unrecognized tokens fall through to FAIL_CLOSED, so synonyms
-# only ever widen the set of phrasings we accept as a *known* class, never the
-# set that slashes a bond.
 _SYNONYMS = {
     "BREACH": BREACH,
     "BREACHED": BREACH,
@@ -619,10 +604,6 @@ def build_comparable(raw, evidence, allowed_clause_ids=None, contested=(0, 1)):
         "verdict": verdict,
         "supporting_sources": sources,
         "clause_ids": clauses,
-        # The full-document fingerprints themselves, echoed alongside the
-        # findings hash so cross-validator agreement is not merely a comparison
-        # of verdicts and source indices: validators must have fetched the same
-        # bytes, not just reached the same class of answer.
         "fingerprints": prints,
         "findings_hash": findings_hash(verdict, sources, clauses, prints),
         "code": code,
@@ -699,7 +680,6 @@ def build_prompt(title, terms, clause_id, claim, evidence):
         + " and anything else, do not choose " + BREACH + "."
     )
 
-# --- end inlined covenantlib ---
 
 ST_PROPOSED = "PROPOSED"
 ST_ACTIVE = "ACTIVE"
@@ -795,7 +775,6 @@ _FAIL_CLOSED = build_comparable({"verdict": INCONCLUSIVE}, [], [])
 
 
 class Covenant(gl.contract.Contract):
-    # --- storage ----------------------------------------------------------
     owner: Address
     treasury: Address
     next_covenant: u256
@@ -822,17 +801,12 @@ class Covenant(gl.contract.Contract):
         self.treasury = _to_address(treasury) or gl.message.sender_address
         self.next_covenant = u256(1)
         self.next_dispute = u256(1)
-        # Constructor-time scalars are plain annotations; GenVM initializes them
-        # to zero, but assigning them keeps the invariant readable in source.
         self.escrow = u256(0)
         self.deposits_total = u256(0)
         self.withdrawn_total = u256(0)
         self.held_total = u256(0)
         self.claimable_total = u256(0)
 
-    # ------------------------------------------------------------------
-    # internals
-    # ------------------------------------------------------------------
 
     def _now(self) -> int:
         try:
@@ -847,9 +821,14 @@ class Covenant(gl.contract.Contract):
     def _sender(self) -> str:
         return gl.message.sender_address.as_hex.lower()
 
-    def _load_agent(self, addr: str):
+    def _agent_record(self, addr: str):
         blob = self.agents.get(_to_account_str(addr))
-        return json.loads(blob) if blob is not None else None
+        if not blob:
+            return None
+        rec = json.loads(blob)
+        if rec.get("status", "ACTIVE") != "ACTIVE":
+            return None
+        return rec
 
     def _load_covenant(self, covenant_id: str):
         blob = self.covenants.get(str(covenant_id).strip())
@@ -903,6 +882,11 @@ class Covenant(gl.contract.Contract):
             items.append(value)
         store["all"] = json.dumps(items)
 
+    def _remove_id(self, store: TreeMap, value: str) -> None:
+        raw = store.get("all")
+        items = json.loads(raw) if raw else []
+        store["all"] = json.dumps([item for item in items if item != value])
+
     def _append_board(self, dispute_id: str) -> None:
         raw = self.board.get("all")
         items = json.loads(raw) if raw else []
@@ -922,14 +906,30 @@ class Covenant(gl.contract.Contract):
         self.next_dispute = u256(n + 1)
         return f"d{n}"
 
-    # ------------------------------------------------------------------
-    # writes: agents
-    # ------------------------------------------------------------------
+    def _open_covenant_for(self, addr: str) -> str:
+        addr = _to_account_str(addr)
+        raw = self.covenant_ids.get("all")
+        ids = json.loads(raw) if raw else []
+        now = self._now()
+        for cid in ids:
+            blob = self.covenants.get(cid)
+            if blob is None:
+                continue
+            c = json.loads(blob)
+            if addr not in (c["proposer"], c["respondent"]):
+                continue
+            status = c["status"]
+            if status == ST_DISPUTED:
+                return cid
+            if status in (ST_PROPOSED, ST_ACTIVE) and now <= int(c["expires_at"]):
+                return cid
+        return ""
+
 
     @gl.public.write.payable
     def register_agent(self, name: str, endpoint: str = "") -> str:
         sender = self._sender()
-        if self.agents.get(sender) is not None:
+        if self._agent_record(sender) is not None:
             _err("agent already registered")
         nm = _guard(lambda: normalize_title(name))
         ep = _guard(lambda: normalize_optional_url(endpoint))
@@ -947,6 +947,8 @@ class Covenant(gl.contract.Contract):
             "endpoint": ep,
             "collateral": str(REG_COLLATERAL),
             "registered_at": self._now(),
+            "status": "ACTIVE",
+            "closed_at": 0,
         }
         self._store_agent(agent)
         self._append_id(self.agent_ids, sender)
@@ -955,7 +957,7 @@ class Covenant(gl.contract.Contract):
     @gl.public.write
     def withdraw_excess(self) -> str:
         sender = self._sender()
-        if self.agents.get(sender) is None:
+        if self._agent_record(sender) is None:
             _err("agent not registered")
         excess = self._held_of(sender) - REG_COLLATERAL
         if excess <= 0:
@@ -964,9 +966,26 @@ class Covenant(gl.contract.Contract):
         self._add_claimable(sender, excess)
         return str(excess)
 
-    # ------------------------------------------------------------------
-    # writes: covenant lifecycle
-    # ------------------------------------------------------------------
+    @gl.public.write
+    def withdraw_collateral(self) -> str:
+        sender = self._sender()
+        if self._agent_record(sender) is None:
+            _err("agent not registered")
+        if self._open_covenant_for(sender):
+            _err("agent has an open covenant")
+        amount = self._held_of(sender)
+        if amount <= 0:
+            _err("no collateral to withdraw")
+        self._add_held(sender, -amount)
+        self._add_claimable(sender, amount)
+
+        rec = self._agent_record(sender)
+        rec["status"] = "CLOSED"
+        rec["closed_at"] = self._now()
+        self._store_agent(rec)
+        self._remove_id(self.agent_ids, sender)
+        return str(amount)
+
 
     @gl.public.write
     def propose_covenant(
@@ -981,14 +1000,14 @@ class Covenant(gl.contract.Contract):
         duration_hours: int,
     ) -> str:
         sender = self._sender()
-        if self.agents.get(sender) is None:
+        if self._agent_record(sender) is None:
             _err("proposer is not a registered agent")
         resp = _to_account_str(respondent)
         if not resp or normalize_address(resp) == "":
             _err("respondent address is invalid")
         if resp == sender:
             _err("a covenant needs two distinct parties")
-        if self.agents.get(resp) is None:
+        if self._agent_record(resp) is None:
             _err("respondent is not a registered agent")
 
         key = _guard(lambda: normalize_covenant_key(covenant_key))
@@ -1000,6 +1019,8 @@ class Covenant(gl.contract.Contract):
         clauses = _guard(lambda: normalize_clause_ids(clause_ids))
         pats = _guard(lambda: normalize_patterns(evidence_patterns))
         tele = _guard(lambda: normalize_optional_url(telemetry_url, pats))
+        if not tele:
+            _err("telemetry url is required: it is the independent second source")
 
         hours = int(duration_hours)
         if hours < MIN_DURATION_HOURS or hours > MAX_DURATION_HOURS:
@@ -1026,8 +1047,6 @@ class Covenant(gl.contract.Contract):
         )
         cid = self._fresh_covenant_id()
 
-        # Reserve the proposer's bond. This is the only place value leaves `held`
-        # for a covenant, so the escrow and the balance move together.
         self._add_held(sender, -DEFAULT_BOND)
         self._move_escrow(DEFAULT_BOND)
 
@@ -1067,6 +1086,10 @@ class Covenant(gl.contract.Contract):
         sender = self._sender()
         if sender != covenant["respondent"]:
             _err("only the named respondent may ratify")
+        if self._now() > int(covenant["expires_at"]):
+            _err("covenant has expired")
+        if self._agent_record(sender) is None:
+            _err("respondent is not registered")
         if self._held_of(sender) - DEFAULT_BOND < REG_COLLATERAL:
             _err("insufficient balance to lock the bond and keep the collateral")
 
@@ -1105,9 +1128,6 @@ class Covenant(gl.contract.Contract):
         self._store_covenant(covenant)
         return ST_EXPIRED
 
-    # ------------------------------------------------------------------
-    # writes: disputes
-    # ------------------------------------------------------------------
 
     @gl.public.write.payable
     def file_dispute(
@@ -1116,14 +1136,15 @@ class Covenant(gl.contract.Contract):
         covenant_id: str,
         clause_id: str,
         claim: str,
-        evidence_a: str,
-        evidence_b: str,
+        evidence_url: str,
     ) -> str:
         covenant = self._load_covenant(covenant_id)
         if covenant is None:
             _err("covenant not found")
         if covenant["status"] != ST_ACTIVE:
             _err("covenant is not active")
+        if self._now() > int(covenant["expires_at"]):
+            _err("covenant has expired")
 
         sender = self._sender()
         if sender not in (covenant["proposer"], covenant["respondent"]):
@@ -1134,18 +1155,19 @@ class Covenant(gl.contract.Contract):
         if clause not in covenant["clause_ids"]:
             _err("cited clause is not part of the covenant")
         stmt = _guard(lambda: normalize_claim(claim))
+        tele = covenant["telemetry_url"]
+        if not tele:
+            _err("covenant has no neutral evidence source")
         urls = _guard(
             lambda: normalize_evidence_urls(
-                [evidence_a, evidence_b], covenant["evidence_patterns"]
+                [evidence_url, tele], covenant["evidence_patterns"]
             )
         )
-        # Two contested documents are the minimum a breach can rest on. The
-        # validator de-duplicates, so two spellings of the same URL collapse to
-        # one; reject that rather than index past the end of the list.
         if len(urls) < 2:
-            _err("evidence urls must be two distinct documents")
+            _err("evidence sources must be two distinct documents")
         evidence_a, evidence_b = urls[0], urls[1]
-        tele = covenant["telemetry_url"]
+        if url_host(evidence_a) == url_host(evidence_b):
+            _err("the claimant's evidence must be independent of the neutral source")
 
         value = int(gl.message.value)
         if value < DEFAULT_DISPUTE_BOND:
@@ -1177,6 +1199,7 @@ class Covenant(gl.contract.Contract):
             "bond": str(DEFAULT_DISPUTE_BOND),
             "status": DS_OPEN,
             "verdict": "",
+            "covenant_settled": False,
             "code": "",
             "supporting_sources": [],
             "clause_ids": [],
@@ -1200,6 +1223,8 @@ class Covenant(gl.contract.Contract):
             _err("dispute not found")
         if dispute["status"] != DS_OPEN:
             _err("dispute is not open")
+        if self._now() >= int(dispute["opened_at"]) + STALE_TIMEOUT_SECONDS:
+            _err("dispute window has closed; cancel it first")
 
         covenant = self._load_covenant(dispute["covenant_id"])
         if covenant is None:
@@ -1213,8 +1238,6 @@ class Covenant(gl.contract.Contract):
         if not authorized:
             _err("not authorized to adjudicate yet")
 
-        # The stored dispute must be the one that was filed. If the commitment
-        # does not re-derive, the inputs were altered and no judgment runs.
         rederived = dispute_commitment(
             dispute["dispute_key"],
             dispute["covenant_hash"],
@@ -1227,46 +1250,52 @@ class Covenant(gl.contract.Contract):
         if rederived != dispute["commitment"]:
             _err("dispute commitment mismatch")
 
-        urls = [dispute["evidence_a"], dispute["evidence_b"]]
-        if dispute["telemetry_url"]:
-            urls.append(dispute["telemetry_url"])
-
         result = self._judge(
             covenant["title"],
             covenant["terms"],
             dispute["clause_id"],
             dispute["claim"],
-            urls,
+            [dispute["evidence_a"], dispute["evidence_b"]],
             covenant["clause_ids"],
         )
         verdict = canon_verdict(result.get("verdict"))
+        if verdict == BREACH and not list(result.get("supporting_sources", [])):
+            verdict = INCONCLUSIVE
 
+        now = self._now()
         bond = int(covenant["bond_amount"])
         dispute_bond = int(dispute["bond"])
         claimant_role = "proposer" if dispute["claimant"] == covenant["proposer"] else "respondent"
-        credits = settle(verdict, bond, dispute_bond, FEE_BPS, BPS_DENOM, claimant_role)
-        if not conserved(credits, escrow_for(bond, dispute_bond)):
+        credits, consumed = settle(verdict, bond, dispute_bond, FEE_BPS, BPS_DENOM, claimant_role)
+        if not conserved(credits, consumed):
             _err("settlement did not conserve value")
 
-        self._move_escrow(-escrow_for(bond, dispute_bond))
-        self._add_claimable(covenant["proposer"], credits["proposer"])
-        self._add_claimable(covenant["respondent"], credits["respondent"])
-        self._add_claimable(self.treasury.as_hex, credits["treasury"])
+        self._move_escrow(-consumed)
+        if verdict == BREACH:
+            self._add_claimable(covenant["proposer"], credits["proposer"])
+            self._add_claimable(covenant["respondent"], credits["respondent"])
+            self._add_claimable(self.treasury.as_hex, credits["treasury"])
+            covenant["status"] = ST_SETTLED
+            covenant["verdict"] = verdict
+            covenant["resolved_at"] = now
+        else:
+            self._add_claimable(dispute["claimant"], credits[claimant_role])
+            covenant["status"] = ST_ACTIVE
+            covenant["dispute_id"] = ""
+            covenant["verdict"] = ""
+            covenant["resolved_at"] = 0
+        self._store_covenant(covenant)
 
         dispute["status"] = DS_RESOLVED
         dispute["verdict"] = verdict
+        dispute["covenant_settled"] = verdict == BREACH
         dispute["code"] = str(result.get("code", ""))
         dispute["supporting_sources"] = list(result.get("supporting_sources", []))
         dispute["clause_ids"] = list(result.get("clause_ids", []))
         dispute["fingerprints"] = list(result.get("fingerprints", []))
         dispute["findings_hash"] = str(result.get("findings_hash", ""))
-        dispute["resolved_at"] = self._now()
+        dispute["resolved_at"] = now
         self._store_dispute(dispute)
-
-        covenant["status"] = ST_SETTLED
-        covenant["verdict"] = verdict
-        covenant["resolved_at"] = self._now()
-        self._store_covenant(covenant)
         return verdict
 
     @gl.public.write
@@ -1293,9 +1322,6 @@ class Covenant(gl.contract.Contract):
             self._store_covenant(covenant)
         return DS_CANCELLED
 
-    # ------------------------------------------------------------------
-    # writes: payouts
-    # ------------------------------------------------------------------
 
     @gl.public.write
     def claim(self) -> str:
@@ -1309,17 +1335,10 @@ class Covenant(gl.contract.Contract):
         _Recipient(gl.message.sender_address).emit_transfer(value=u256(amount))
         return str(amount)
 
-    # ------------------------------------------------------------------
-    # the one non-deterministic path
-    # ------------------------------------------------------------------
 
     def _judge(self, title, terms, clause_id, claim, urls, allowed_clauses) -> dict:
 
         def judge() -> str:
-            # Inlined rather than factored: genvm-lint only follows
-            # gl.nondet.* calls made directly inside the function handed to the
-            # equivalence principle, and rejects the contract when they sit one
-            # closure hop away.
             evidence = []
             all_ok = True
             for u in urls:
@@ -1332,9 +1351,6 @@ class Covenant(gl.contract.Contract):
                     all_ok = False
                 evidence.append(ev)
 
-            # An unreadable or partially-read evidence set can only ever be
-            # INCONCLUSIVE. The model is not consulted at all in that case, so a
-            # fetch failure is structurally incapable of slashing a bond.
             if not all_ok:
                 return comparable_json(
                     build_comparable({"verdict": INCONCLUSIVE}, evidence, allowed_clauses)
@@ -1348,13 +1364,8 @@ class Covenant(gl.contract.Contract):
             agreed = gl.eq_principle.strict_eq(judge)
             return _parse_agreed(agreed, _FAIL_CLOSED)
         except Exception:
-            # No consensus, or the judgment could not run at all. A technical
-            # failure, not a finding: fail closed and never slash a bond.
             return dict(_FAIL_CLOSED)
 
-    # ------------------------------------------------------------------
-    # views
-    # ------------------------------------------------------------------
 
     @gl.public.view
     def get_config(self) -> str:
@@ -1380,7 +1391,8 @@ class Covenant(gl.contract.Contract):
 
     @gl.public.view
     def get_agent(self, addr: str) -> str:
-        return self.agents.get(_to_account_str(addr), "")
+        rec = self._agent_record(addr)
+        return json.dumps(rec, sort_keys=True) if rec else ""
 
     @gl.public.view
     def get_agent_ids(self) -> str:

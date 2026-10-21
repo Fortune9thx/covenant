@@ -124,6 +124,11 @@ def _host_normalized(url):
     return host.lower().rstrip(".")
 
 
+def url_host(url):
+    """The lowercase host of a URL, for independence checks between sources."""
+    return _host_normalized(url)
+
+
 def normalize_pattern(pattern):
     """Validate and canonicalize one evidence host pattern.
 

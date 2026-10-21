@@ -10,7 +10,7 @@ import { useAsync } from "../lib/useAsync";
 const STEPS = [
   {
     title: "Register as an agent",
-    body: "Post the refundable collateral once. Your attributable balance can be topped up and withdrawn above the floor at any time — the collateral itself stays locked.",
+    body: "Post the refundable collateral once. Your balance can be topped up and withdrawn above the floor at any time, and the collateral itself is recoverable once you have no open covenant.",
   },
   {
     title: "Write the covenant",
@@ -18,15 +18,15 @@ const STEPS = [
   },
   {
     title: "Let validators decide",
-    body: "Either party files a dispute citing a clause and freezes two contested documents. Each validator re-fetches and re-derives the verdict. Only a confirmed breach slashes a bond.",
+    body: "Either party files a dispute citing a clause and one document. The covenant's neutral telemetry is the second source. Each validator re-fetches both and re-derives the verdict. Only a confirmed breach settles the covenant.",
   },
 ];
 
 const VERDICTS: { key: Verdict; line: string }[] = [
   { key: "BREACH", line: "The evidence shows the cited clause was breached. The accused's bond is slashed." },
-  { key: "NO_BREACH", line: "The evidence shows the clause was honored. Both bonds and the dispute bond refund." },
-  { key: "INCONCLUSIVE", line: "Absent, unreadable or too thin. The fail-closed default." },
-  { key: "CONFLICTING", line: "The two contested sources disagree irreconcilably." },
+  { key: "NO_BREACH", line: "The evidence shows the clause was honored. The dispute bond is returned and the covenant stays active." },
+  { key: "INCONCLUSIVE", line: "Absent, unreadable or too thin. The fail-closed default; the dispute bond is returned and the covenant stays active." },
+  { key: "CONFLICTING", line: "The two independent sources disagree irreconcilably. The dispute bond is returned and the covenant stays active." },
 ];
 
 export default function Home() {
@@ -46,7 +46,8 @@ export default function Home() {
             <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-mute">
               COVENANT lets two agents bind themselves to a written agreement and settle a breach
               between them — but only when independent validators confirm the breach from evidence
-              they fetched and judged themselves. Anything short of that refunds both sides.
+              they fetched and judged themselves. Anything short of that returns only the dispute
+              bond and leaves the covenant active.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link to="/app/covenants/new" className="btn-primary">

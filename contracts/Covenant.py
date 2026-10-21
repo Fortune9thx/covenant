@@ -9,10 +9,12 @@ evidence documents plus the covenant's telemetry URL.
 
 Validators then independently fetch that evidence and decide, under the
 Equivalence Principle, exactly one of four discrete verdicts. Only `BREACH`
-slashes a bond: the accused's bond is cut and paid to the claimant, a protocol
-fee goes to the treasury, and every other verdict refunds both covenant bonds
-and the filer's dispute bond. Every technical failure resolves to
-`INCONCLUSIVE`, which refunds in full.
+settles the covenant: the accused's bond is cut and paid to the claimant, a
+protocol fee goes to the treasury, and the filer's dispute bond is returned.
+Every other verdict leaves the covenant active with both covenant bonds still
+escrowed and refunds only the filer's dispute bond, so a failed or inconclusive
+claim cannot close a covenant or move either party's bond. Every technical
+failure resolves to `INCONCLUSIVE`.
 
 State is JSON documents in TreeMaps rather than nested storage dataclasses:
 covenants and disputes are read and written whole, so a single document is the
@@ -35,7 +37,7 @@ from genlayer.types import *
 # isort: on
 
 # --- covenantlib (inlined by contracts/build_bundle.py for deployment) -------
-from covenantlib.accounting import conserved, escrow_for, settle
+from covenantlib.accounting import conserved, settle
 from covenantlib.canonicalize import (
     covenant_digest,
     dispute_commitment,
@@ -48,6 +50,7 @@ from covenantlib.canonicalize import (
     normalize_title,
 )
 from covenantlib.judgment import (
+    BREACH,
     INCONCLUSIVE,
     build_comparable,
     build_prompt,
@@ -61,6 +64,7 @@ from covenantlib.ssrf import (
     normalize_evidence_urls,
     normalize_optional_url,
     normalize_patterns,
+    url_host,
 )
 
 # --- end covenantlib ---------------------------------------------------------
@@ -230,9 +234,15 @@ class Covenant(gl.contract.Contract):
     def _sender(self) -> str:
         return gl.message.sender_address.as_hex.lower()
 
-    def _load_agent(self, addr: str):
+    def _agent_record(self, addr: str):
+        """The agent's live record, or None once it has closed its registration."""
         blob = self.agents.get(_to_account_str(addr))
-        return json.loads(blob) if blob is not None else None
+        if not blob:
+            return None
+        rec = json.loads(blob)
+        if rec.get("status", "ACTIVE") != "ACTIVE":
+            return None
+        return rec
 
     def _load_covenant(self, covenant_id: str):
         blob = self.covenants.get(str(covenant_id).strip())
@@ -288,6 +298,11 @@ class Covenant(gl.contract.Contract):
             items.append(value)
         store["all"] = json.dumps(items)
 
+    def _remove_id(self, store: TreeMap, value: str) -> None:
+        raw = store.get("all")
+        items = json.loads(raw) if raw else []
+        store["all"] = json.dumps([item for item in items if item != value])
+
     def _append_board(self, dispute_id: str) -> None:
         raw = self.board.get("all")
         items = json.loads(raw) if raw else []
@@ -307,6 +322,31 @@ class Covenant(gl.contract.Contract):
         self.next_dispute = u256(n + 1)
         return f"d{n}"
 
+    def _open_covenant_for(self, addr: str) -> str:
+        """The id of a covenant that still binds `addr`, or "".
+
+        A dispute always blocks. A proposal or active covenant blocks until its
+        term lapses; an expired covenant no longer blocks, because its bonds are
+        already escrowed and the agent's held balance no longer contains them.
+        """
+        addr = _to_account_str(addr)
+        raw = self.covenant_ids.get("all")
+        ids = json.loads(raw) if raw else []
+        now = self._now()
+        for cid in ids:
+            blob = self.covenants.get(cid)
+            if blob is None:
+                continue
+            c = json.loads(blob)
+            if addr not in (c["proposer"], c["respondent"]):
+                continue
+            status = c["status"]
+            if status == ST_DISPUTED:
+                return cid
+            if status in (ST_PROPOSED, ST_ACTIVE) and now <= int(c["expires_at"]):
+                return cid
+        return ""
+
     # ------------------------------------------------------------------
     # writes: agents
     # ------------------------------------------------------------------
@@ -320,7 +360,7 @@ class Covenant(gl.contract.Contract):
         `REG_COLLATERAL`; `withdraw_excess` can never draw it below.
         """
         sender = self._sender()
-        if self.agents.get(sender) is not None:
+        if self._agent_record(sender) is not None:
             _err("agent already registered")
         nm = _guard(lambda: normalize_title(name))
         ep = _guard(lambda: normalize_optional_url(endpoint))
@@ -338,6 +378,8 @@ class Covenant(gl.contract.Contract):
             "endpoint": ep,
             "collateral": str(REG_COLLATERAL),
             "registered_at": self._now(),
+            "status": "ACTIVE",
+            "closed_at": 0,
         }
         self._store_agent(agent)
         self._append_id(self.agent_ids, sender)
@@ -352,7 +394,7 @@ class Covenant(gl.contract.Contract):
         floor.
         """
         sender = self._sender()
-        if self.agents.get(sender) is None:
+        if self._agent_record(sender) is None:
             _err("agent not registered")
         excess = self._held_of(sender) - REG_COLLATERAL
         if excess <= 0:
@@ -360,6 +402,34 @@ class Covenant(gl.contract.Contract):
         self._add_held(sender, -excess)
         self._add_claimable(sender, excess)
         return str(excess)
+
+    @gl.public.write
+    def withdraw_collateral(self) -> str:
+        """Close the registration and refund every remaining held wei.
+
+        This is the final withdrawal path the registration collateral always
+        claimed to have. It is creator-only, requires that no covenant still
+        binds the agent (an open proposal, an active term, or any dispute), and
+        moves the whole held balance to `claimable`. `claim()` then zeroes the
+        ledger before the transfer, so value leaves only through the pull path.
+        """
+        sender = self._sender()
+        if self._agent_record(sender) is None:
+            _err("agent not registered")
+        if self._open_covenant_for(sender):
+            _err("agent has an open covenant")
+        amount = self._held_of(sender)
+        if amount <= 0:
+            _err("no collateral to withdraw")
+        self._add_held(sender, -amount)
+        self._add_claimable(sender, amount)
+
+        rec = self._agent_record(sender)
+        rec["status"] = "CLOSED"
+        rec["closed_at"] = self._now()
+        self._store_agent(rec)
+        self._remove_id(self.agent_ids, sender)
+        return str(amount)
 
     # ------------------------------------------------------------------
     # writes: covenant lifecycle
@@ -383,14 +453,14 @@ class Covenant(gl.contract.Contract):
         proposer's held balance; the registration collateral stays locked.
         """
         sender = self._sender()
-        if self.agents.get(sender) is None:
+        if self._agent_record(sender) is None:
             _err("proposer is not a registered agent")
         resp = _to_account_str(respondent)
         if not resp or normalize_address(resp) == "":
             _err("respondent address is invalid")
         if resp == sender:
             _err("a covenant needs two distinct parties")
-        if self.agents.get(resp) is None:
+        if self._agent_record(resp) is None:
             _err("respondent is not a registered agent")
 
         key = _guard(lambda: normalize_covenant_key(covenant_key))
@@ -402,6 +472,10 @@ class Covenant(gl.contract.Contract):
         clauses = _guard(lambda: normalize_clause_ids(clause_ids))
         pats = _guard(lambda: normalize_patterns(evidence_patterns))
         tele = _guard(lambda: normalize_optional_url(telemetry_url, pats))
+        # The neutral source is the second contested document a dispute may cite,
+        # so it must exist and be frozen before either party can file.
+        if not tele:
+            _err("telemetry url is required: it is the independent second source")
 
         hours = int(duration_hours)
         if hours < MIN_DURATION_HOURS or hours > MAX_DURATION_HOURS:
@@ -470,6 +544,10 @@ class Covenant(gl.contract.Contract):
         sender = self._sender()
         if sender != covenant["respondent"]:
             _err("only the named respondent may ratify")
+        if self._now() > int(covenant["expires_at"]):
+            _err("covenant has expired")
+        if self._agent_record(sender) is None:
+            _err("respondent is not registered")
         if self._held_of(sender) - DEFAULT_BOND < REG_COLLATERAL:
             _err("insufficient balance to lock the bond and keep the collateral")
 
@@ -520,21 +598,23 @@ class Covenant(gl.contract.Contract):
         covenant_id: str,
         clause_id: str,
         claim: str,
-        evidence_a: str,
-        evidence_b: str,
+        evidence_url: str,
     ) -> str:
-        """File a dispute against an active covenant.
+        """File a dispute with exactly one claimant-supplied document.
 
-        The attached value must cover the dispute bond; anything above it is
-        held as refundable balance, so no value is ever stranded by an
-        overpayment. The two contested documents are frozen, and the covenant's
-        telemetry URL is captured alongside them as a neutral third source.
+        The covenant's telemetry URL is the second, independent source: it was
+        fixed at proposal and ratified by both parties, so the claimant cannot
+        choose both sides of the comparison. The two sources must be distinct
+        documents on distinct hosts. The attached value must cover the dispute
+        bond; anything above it stays as refundable balance.
         """
         covenant = self._load_covenant(covenant_id)
         if covenant is None:
             _err("covenant not found")
         if covenant["status"] != ST_ACTIVE:
             _err("covenant is not active")
+        if self._now() > int(covenant["expires_at"]):
+            _err("covenant has expired")
 
         sender = self._sender()
         if sender not in (covenant["proposer"], covenant["respondent"]):
@@ -545,18 +625,22 @@ class Covenant(gl.contract.Contract):
         if clause not in covenant["clause_ids"]:
             _err("cited clause is not part of the covenant")
         stmt = _guard(lambda: normalize_claim(claim))
+        tele = covenant["telemetry_url"]
+        if not tele:
+            _err("covenant has no neutral evidence source")
         urls = _guard(
             lambda: normalize_evidence_urls(
-                [evidence_a, evidence_b], covenant["evidence_patterns"]
+                [evidence_url, tele], covenant["evidence_patterns"]
             )
         )
-        # Two contested documents are the minimum a breach can rest on. The
-        # validator de-duplicates, so two spellings of the same URL collapse to
-        # one; reject that rather than index past the end of the list.
+        # The claimant supplies at most one source; the second is the frozen
+        # telemetry URL. They must be distinct documents on distinct hosts, or
+        # there is no independent verification at all.
         if len(urls) < 2:
-            _err("evidence urls must be two distinct documents")
+            _err("evidence sources must be two distinct documents")
         evidence_a, evidence_b = urls[0], urls[1]
-        tele = covenant["telemetry_url"]
+        if url_host(evidence_a) == url_host(evidence_b):
+            _err("the claimant's evidence must be independent of the neutral source")
 
         value = int(gl.message.value)
         if value < DEFAULT_DISPUTE_BOND:
@@ -588,6 +672,7 @@ class Covenant(gl.contract.Contract):
             "bond": str(DEFAULT_DISPUTE_BOND),
             "status": DS_OPEN,
             "verdict": "",
+            "covenant_settled": False,
             "code": "",
             "supporting_sources": [],
             "clause_ids": [],
@@ -617,6 +702,8 @@ class Covenant(gl.contract.Contract):
             _err("dispute not found")
         if dispute["status"] != DS_OPEN:
             _err("dispute is not open")
+        if self._now() >= int(dispute["opened_at"]) + STALE_TIMEOUT_SECONDS:
+            _err("dispute window has closed; cancel it first")
 
         covenant = self._load_covenant(dispute["covenant_id"])
         if covenant is None:
@@ -644,46 +731,56 @@ class Covenant(gl.contract.Contract):
         if rederived != dispute["commitment"]:
             _err("dispute commitment mismatch")
 
-        urls = [dispute["evidence_a"], dispute["evidence_b"]]
-        if dispute["telemetry_url"]:
-            urls.append(dispute["telemetry_url"])
-
         result = self._judge(
             covenant["title"],
             covenant["terms"],
             dispute["clause_id"],
             dispute["claim"],
-            urls,
+            [dispute["evidence_a"], dispute["evidence_b"]],
             covenant["clause_ids"],
         )
         verdict = canon_verdict(result.get("verdict"))
+        if verdict == BREACH and not list(result.get("supporting_sources", [])):
+            # A breach must rest on a source that directly supports it.
+            verdict = INCONCLUSIVE
 
+        now = self._now()
         bond = int(covenant["bond_amount"])
         dispute_bond = int(dispute["bond"])
         claimant_role = "proposer" if dispute["claimant"] == covenant["proposer"] else "respondent"
-        credits = settle(verdict, bond, dispute_bond, FEE_BPS, BPS_DENOM, claimant_role)
-        if not conserved(credits, escrow_for(bond, dispute_bond)):
+        credits, consumed = settle(verdict, bond, dispute_bond, FEE_BPS, BPS_DENOM, claimant_role)
+        if not conserved(credits, consumed):
             _err("settlement did not conserve value")
 
-        self._move_escrow(-escrow_for(bond, dispute_bond))
-        self._add_claimable(covenant["proposer"], credits["proposer"])
-        self._add_claimable(covenant["respondent"], credits["respondent"])
-        self._add_claimable(self.treasury.as_hex, credits["treasury"])
+        self._move_escrow(-consumed)
+        if verdict == BREACH:
+            # Only a proven breach settles a covenant and moves either bond.
+            self._add_claimable(covenant["proposer"], credits["proposer"])
+            self._add_claimable(covenant["respondent"], credits["respondent"])
+            self._add_claimable(self.treasury.as_hex, credits["treasury"])
+            covenant["status"] = ST_SETTLED
+            covenant["verdict"] = verdict
+            covenant["resolved_at"] = now
+        else:
+            # No breach: the covenant is not settled. Return the filer's dispute
+            # bond and leave both covenant bonds in escrow.
+            self._add_claimable(dispute["claimant"], credits[claimant_role])
+            covenant["status"] = ST_ACTIVE
+            covenant["dispute_id"] = ""
+            covenant["verdict"] = ""
+            covenant["resolved_at"] = 0
+        self._store_covenant(covenant)
 
         dispute["status"] = DS_RESOLVED
         dispute["verdict"] = verdict
+        dispute["covenant_settled"] = verdict == BREACH
         dispute["code"] = str(result.get("code", ""))
         dispute["supporting_sources"] = list(result.get("supporting_sources", []))
         dispute["clause_ids"] = list(result.get("clause_ids", []))
         dispute["fingerprints"] = list(result.get("fingerprints", []))
         dispute["findings_hash"] = str(result.get("findings_hash", ""))
-        dispute["resolved_at"] = self._now()
+        dispute["resolved_at"] = now
         self._store_dispute(dispute)
-
-        covenant["status"] = ST_SETTLED
-        covenant["verdict"] = verdict
-        covenant["resolved_at"] = self._now()
-        self._store_covenant(covenant)
         return verdict
 
     @gl.public.write
@@ -816,7 +913,8 @@ class Covenant(gl.contract.Contract):
 
     @gl.public.view
     def get_agent(self, addr: str) -> str:
-        return self.agents.get(_to_account_str(addr), "")
+        rec = self._agent_record(addr)
+        return json.dumps(rec, sort_keys=True) if rec else ""
 
     @gl.public.view
     def get_agent_ids(self) -> str:

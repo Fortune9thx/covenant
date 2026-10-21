@@ -37,7 +37,7 @@ export default function NewCovenant() {
     e.preventDefault();
     const clauseIds = toList(clauses);
     if (!key.trim() || !respondent.trim() || !title.trim() || !terms.trim()) return;
-    if (!clauseIds.length) return;
+    if (!clauseIds.length || !telemetry.trim()) return;
     const dur = clampInt(hours, minH, maxH, 24);
     tx.run("propose_covenant", [
       key.trim(),
@@ -52,7 +52,13 @@ export default function NewCovenant() {
   };
 
   const ready =
-    live && key.trim() && respondent.trim() && title.trim() && terms.trim() && toList(clauses).length;
+    live &&
+    key.trim() &&
+    respondent.trim() &&
+    title.trim() &&
+    terms.trim() &&
+    telemetry.trim() &&
+    toList(clauses).length;
 
   return (
     <Section className="py-12">
@@ -120,14 +126,19 @@ export default function NewCovenant() {
               />
             </Field>
 
-            <Field label="Telemetry URL (optional, frozen at proposal)">
+            <Field label="Telemetry URL (required, frozen at proposal)">
               <input
                 className="input mt-1.5"
                 value={telemetry}
                 onChange={(e) => setTelemetry(e.target.value)}
-                placeholder="https://example.com/telemetry.json"
+                placeholder="https://status.example.com/telemetry.json"
               />
             </Field>
+            <p className="-mt-3 text-[12px] leading-relaxed text-mute">
+              This neutral document is the second evidence source in a dispute, so the claimant can
+              never supply both sides. It must match an allowed evidence host and be on a different
+              host from the claimant's own document.
+            </p>
 
             <div className="grid gap-5 sm:grid-cols-2">
               <Field label={`Duration (hours, ${minH}–${maxH})`}>

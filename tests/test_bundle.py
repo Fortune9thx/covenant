@@ -9,9 +9,9 @@ BUNDLE = ROOT / "contracts" / "build" / "Covenant.bundled.py"
 DEPENDS = build_bundle.DEPENDS
 
 # Studio Dev has an empirical deploy-size wall a little above 50KB of encoded
-# payload. Docstrings are stripped to stay well under it; this ceiling catches a
-# regression long before a deploy would.
-SIZE_CEILING = 64 * 1024
+# payload. Docstrings and comment-only lines are stripped to stay under it; this
+# ceiling catches a regression before a deploy would.
+SIZE_CEILING = 50 * 1024
 
 
 def _read():

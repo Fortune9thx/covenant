@@ -13,7 +13,7 @@ inlines `covenantlib` between two markers and writes
 bundler:
 
 - re-emits the pinned `Depends` directive as the first byte;
-- strips docstrings (AST-based) to keep the bundle small;
+- strips docstrings (AST-based) and comment-only lines to keep the bundle small;
 - refuses to drop imported names, to write a BOM, or to emit code that does not
   compile.
 
@@ -56,9 +56,9 @@ claimable_total scalar  -> sum of `claimable`
 
 ### Methods
 
-Writes (9): `register_agent` (payable), `withdraw_excess`, `propose_covenant`,
-`ratify_covenant`, `expire_covenant`, `file_dispute` (payable), `adjudicate`,
-`cancel_stale`, `claim`.
+Writes (10): `register_agent` (payable), `withdraw_excess`,
+`withdraw_collateral`, `propose_covenant`, `ratify_covenant`, `expire_covenant`,
+`file_dispute` (payable), `adjudicate`, `cancel_stale`, `claim`.
 
 Views (9): `get_config`, `get_agent`, `get_agent_ids`, `get_covenant`,
 `get_covenant_ids`, `get_dispute`, `get_board`, `get_claimable`, `get_solvency`.
@@ -69,9 +69,16 @@ Value enters only through the two payable methods (`register_agent`,
 `file_dispute`), which credit the sender's `held` balance and add to
 `deposits_total`. Bonds are reserved from `held` into `escrow`
 (`propose_covenant` and `ratify_covenant` lock `DEFAULT_BOND` each;
-`file_dispute` locks `DEFAULT_DISPUTE_BOND`). Adjudication returns `escrow` to
-`claimable`; `claim()` zeroes a `claimable` balance and pays it out. Under every
-transition the invariant
+`file_dispute` locks `DEFAULT_DISPUTE_BOND`). Registration collateral is held
+value, not a fee: `withdraw_collateral` closes an agent with no open covenant
+and moves the whole balance to `claimable`.
+
+Adjudication returns settlement credits to `claimable`; only `BREACH` consumes
+both covenant bonds and the dispute bond, pays the claimant minus `fee_bps`, and
+sends the fee to `treasury`. `NO_BREACH`, `INCONCLUSIVE`, and `CONFLICTING`
+consume only the dispute bond, return it to the filer, and leave the covenant
+active with both covenant bonds still escrowed. `claim()` zeroes a `claimable`
+balance and pays it out. Under every transition the invariant
 
 ```
 deposits_total - withdrawn_total == held_total + claimable_total + escrow
@@ -94,6 +101,15 @@ per-source fingerprints. Any exception — including no consensus — falls back
 The fetch loop is inlined into `judge` rather than factored into a helper,
 because `genvm-lint` only follows `gl.nondet.*` calls made directly inside the
 function handed to the equivalence principle.
+
+### Evidence independence
+
+A covenant freezes one neutral telemetry URL at proposal/ratification. A dispute
+adds one claimant document. `file_dispute` rejects a document whose host or path
+matches the telemetry, so the two sources are not the same page, and `adjudicate`
+reads both. A `BREACH` must cite at least one source and one covenant clause;
+otherwise the verdict is downgraded to `INCONCLUSIVE`. The model sees the
+claimant's document and the telemetry, not a document chosen by the accused.
 
 ### Time
 

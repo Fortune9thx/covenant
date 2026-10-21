@@ -10,7 +10,7 @@ deployed source is a finding.
 
 Enforced: `_judge` holds the single `gl.eq_principle.strict_eq(judge)`; the fetch
 loop is inlined into `judge` so `genvm-lint` can see every `gl.nondet.*` call
-reachable from the equivalence block. `genvm-lint check` passes.
+reachable from the equivalence block. `genvm-lint lint` passes.
 Tests: `test_state_machine.py` (every adjudication path); the linter gate in CI.
 
 ### 2. Fail closed
@@ -39,12 +39,13 @@ every adjudication path.
 
 ### 5. Escrow is conserved
 
-Enforced: `settle` returns a credit for every owed role and the contract asserts
-`conserved(credits, escrow_for(bond, dispute_bond))` before moving value; the
-credit sums exactly to the escrowed bonds.
+Enforced: `settle` returns `(credits, consumed)`; the contract asserts
+`conserved(credits, consumed)` before moving value. Only `BREACH` consumes
+`2 * bond + dispute_bond`; every other verdict consumes only `dispute_bond`, so
+no non-breach outcome can move either covenant bond or close the covenant.
 Tests: `test_accounting.py` (all verdicts and both claimant roles),
 `test_breach_slashes_the_accused_and_pays_the_claimant`,
-`test_non_breach_refunds_both_bonds`.
+`test_non_breach_returns_only_the_dispute_bond_and_keeps_the_covenant`.
 
 ### 6. The whole value system balances
 
@@ -58,9 +59,13 @@ filing, settlement, cancellation, and expiry.
 ### 7. The collateral floor holds
 
 Enforced: `propose_covenant` and `ratify_covenant` require the sender's held
-balance to stay at or above `REG_COLLATERAL` after locking the bond, and
-`withdraw_excess` can only move value above `REG_COLLATERAL`.
-Tests: `test_withdraw_excess_respects_the_collateral_floor`.
+balance to stay at or above `REG_COLLATERAL` after locking the bond;
+`withdraw_excess` can only move value above `REG_COLLATERAL`;
+`withdraw_collateral` closes the agent and returns units only when no covenant
+still names the agent, so registration collateral is not a one-way deposit.
+Tests: `test_withdraw_excess_respects_the_collateral_floor`,
+`test_withdraw_collateral_closes_and_refunds`, and the live withdrawal recorded
+in `STATUS.md`.
 
 ### 8. Payouts are pull-only
 
@@ -71,12 +76,16 @@ Tests: `test_claim_is_pull_only_and_once`.
 ### 9. Every escrowed status has an escape hatch
 
 Enforced: `cancel_stale` refunds an open dispute after the stale timeout and
-reactivates the covenant; `expire_covenant` refunds a lapsed covenant's bonds;
-a non-`BREACH` verdict refunds in full at adjudication.
+reactivates the covenant; `expire_covenant` refunds a lapsed covenant's bonds
+and is blocked while a dispute is open; a non-`BREACH` verdict returns the
+dispute bond at adjudication and leaves both covenant bonds escrowed.
+`withdraw_collateral` is the registration-collateral escape hatch.
 Tests: `test_cancel_stale_refunds_and_reactivates`,
 `test_expire_covenant_returns_both_bonds`,
 `test_expire_proposed_covenant_refunds_the_proposer`,
-`test_expire_covenant_is_blocked_while_disputed`.
+`test_expire_covenant_is_blocked_while_disputed`,
+`test_non_breach_returns_only_the_dispute_bond_and_keeps_the_covenant`,
+`test_withdraw_collateral_closes_and_refunds`.
 
 ### 10. Evidence is confined
 
@@ -86,6 +95,22 @@ covenant. The check runs once, when the URL is filed; the validated string is
 stored and that stored value is what validators fetch, so no later caller can
 substitute a URL. The check covers the URL string, not where a redirect leads.
 Tests: `test_ssrf.py`, `test_file_dispute_rejects_a_disallowed_host`.
+
+### 10a. Evidence sources are independent
+
+Enforced: `propose_covenant` requires a telemetry URL; `ratify_covenant`
+freezes it. `file_dispute` rejects a claimant document that resolves to the same
+host as the telemetry, or whose path matches the telemetry's path, so the
+claimant cannot cite the same document twice. The judge always reads the
+claimant document and the neutral telemetry; on `BREACH` it also requires the
+verdict to cite at least one source and at least one covenant clause, otherwise
+the result is downgraded to `INCONCLUSIVE`. The accused's contradictory reading
+is the telemetry, not a document the claimant controls.
+Tests: `test_file_dispute_rejects_same_host_evidence`,
+`test_file_dispute_rejects_same_path_evidence`,
+`test_breach_without_sources_is_downgraded`,
+`test_adjudicate_requires_telemetry`. The live run used a public gist and a
+different host, recorded in `STATUS.md`.
 
 ### 11. Inputs are bounded
 
@@ -121,15 +146,30 @@ Enforced: `build_bundle.py` regenerates deterministically and CI diffs the
 result.
 Tests: `test_bundle.py`.
 
+### 16. Expiry and adjudication windows are bounded on both sides
+
+Enforced: `expire_covenant` requires `now >= expires_at`; `file_dispute` and
+`adjudicate` require the covenant to be active and not past expiry.
+`adjudicate` rejects a stranger before `opened_at + assess_delay` and any
+caller after the covenant expires or the stale timeout, so neither party can
+sit on a dispute indefinitely. It also rejects an already resolved dispute and
+a covenant that another dispute already settled.
+Tests: `test_adjudicate_rejects_after_expiry`,
+`test_adjudicate_is_bounded_by_the_upper_window`,
+`test_expire_covenant_is_blocked_while_disputed`,
+`test_stranger_cannot_adjudicate_before_the_delay`.
+
 ## Known limits
 
 - The verdict is only as good as the evidence hosts a covenant allows. A covenant
   authored to trust a compromised host can be fooled; the protocol bounds this to
   hosts named in advance, not to truth.
-- The accused's evidence is located through the two contested documents the
-  claimant freezes and the covenant's neutral telemetry URL, not submitted live
-  by the accused after the fact. A design that let both parties file evidence
-  would need its own anti-spam and liveness argument.
+- The claimant files one document and the covenant freezes one neutral telemetry
+  URL. The contract enforces that those are different hosts, but not that either
+  is honest. The proposer chooses the telemetry host and the respondent accepts
+  it by ratifying; a respondent that ratifies a host it does not trust has
+  consented to that source. A design that let both parties file evidence would
+  need its own anti-spam and liveness argument.
 - `CONFLICTING` is a model judgment over the fetched text; it is corroborated by
   validators re-fetching, but it is not a cryptographic proof of provenance.
 - The URL check does not inspect redirects. An allow-listed host that redirects

@@ -1,0 +1,9 @@
+CLAIMANT EVIDENCE - CLEAN WINDOW
+
+Reporting party: proposer
+Covenant window: 2026-10-21T00:00Z to 2026-10-22T00:00Z
+Service: covenant-demo-api
+
+The service was available for the entire covenant window. Monitoring recorded
+no outage, and every health probe succeeded. The cited clause "uptime" was
+honored.
